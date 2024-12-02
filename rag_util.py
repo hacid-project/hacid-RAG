@@ -1,26 +1,31 @@
 # Description: This file contains utility functions to initialize the RAG pipeline and query the pipeline with a question.
 
-import os
+import os, json
 import torch
 import sys, re
 import logging
-from transformers import BitsAndBytesConfig
+from transformers import BitsAndBytesConfig, pipeline, AutoModelForCausalLM, AutoTokenizer
+import openai
+from openai import OpenAI
+os.environ["OPENAI_API_KEY"] = ""
 
-from llama_index.core import KnowledgeGraphIndex, ServiceContext, SimpleDirectoryReader, download_loader, load_index_from_storage
+from llama_index.core import KnowledgeGraphIndex, Settings, ServiceContext, SimpleDirectoryReader, download_loader, load_index_from_storage
 from llama_index.core.storage.storage_context import StorageContext
 from llama_index.core.graph_stores import SimpleGraphStore
 from llama_index.llms.openai import OpenAI
 from llama_index.llms.huggingface import HuggingFaceLLM, HuggingFaceInferenceAPI
 from llama_index.core.prompts import PromptTemplate
 from IPython.display import Markdown, display
-from langchain.embeddings.huggingface import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
+# from langchain.embeddings.huggingface import HuggingFaceEmbeddings
 # from llama_index.core.embeddings.openai import OpenAIEmbedding
 
 
 LLM = {
-    "commandr": "CohereForAI/c4ai-command-r-v01-4bit",
-    "zephyralpha": "HuggingFaceH4/zephyr-7b-alpha",
-    "zephyrbeta": "HuggingFaceH4/zephyr-7b-beta",
+    "solar": "upstage/solar-pro-preview-instruct",
+    "mistralsmall": "mistralai/Mistral-Small-Instruct-2409",
+    "llama3.18b": "meta-llama/Llama-3.1-8B-Instruct",
+    "gpt-4o-mini": "gpt-4o-mini",
 }
 
 EMBED_MODEL = {
@@ -42,23 +47,28 @@ def logging_setup(log_file=".log", log_level=logging.INFO):
     # logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
     sys.stdout = open(log_file, "a")
 
+def format_response(response):
+    response = response.replace("\n", "")
+    response = response.replace("), (", ") (")
+    response = response.replace("),(", ") (")
+    response = response.replace("'", "")
+    response = response.replace(")(" , ") (")
+
+    return response
 
 def extract_triple(answer, notebook=False, split_str1="Triples:", split_str2="Answer End"):
-    split_str1 = "Triples:"
-    split_str2 = "Answer End"
-
+    answer = format_response(answer)
     try:
-        if split_str2 in answer:
-            answer = answer.split(split_str2)[0]
         if split_str1 in answer:
             answer = answer.split(split_str1)[1]
+        if split_str2 in answer:
+            answer = answer.split(split_str2)[0]
         else:
             pass
         return answer.strip().replace("\n", "") if not notebook else answer.strip()
     except Exception as e:
         print(e)
         return None
-
 
 # Define a function to clean the response
 def clean_response(response):
@@ -148,7 +158,7 @@ def clean_response(response):
 
         return cleaned_text
 
-    keywords = ["Note:", "Explanation:", "Prompt:", "Context:", "Context", "Queries:", "Query:", "Answer:", "Here is", "Code:", "---"]
+    keywords = ["Note:", "Explanation:", "Prompt:", "Context:", "Context", "Queries:", "Query:", "Here is", "Code:", "---"]
     # response_list = response.split("\n")
     for keyword in keywords:
         if keyword in response:
@@ -191,21 +201,99 @@ def messages_to_prompt(messages):
     return prompt
 
 
+def init_llm_pipeline(llm_model_name):
+
+    if llm_model_name.find("gpt") != -1:
+        pipe = OpenAI()
+        
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(llm_model_name)
+        model = AutoModelForCausalLM.from_pretrained(llm_model_name, 
+                                                     device_map="cuda:1",
+                                                     torch_dtype="auto", 
+                                                     quantization_config=quantization_config,
+                                                     trust_remote_code=True,)
+        
+        pipe = pipeline("text-generation", model=model, tokenizer=tokenizer)
+
+    logging.info(f"LLM extractor pipeline built: {llm_model_name}")
+    return pipe
+
+
+def entity_extractor(text, pipe, using_extractor):
+    prompt_tmpl = f"Extract all entities from the following text: {text}. \n ONLY respond with the ENTITIES without any reasoning. \n Entities: []"
+
+    messages = [
+                # {
+                #     "role": "system",
+                #     "content": "You are a friendly chatbot who always responds in the style of a pirate",
+                # },
+                {"role": "user", "content": prompt_tmpl.format(text=text)},
+            ]
+    
+    if using_extractor.find("gpt") != -1:
+        completion = openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages
+            )
+
+        # print(completion.choices[0].message.content)
+        entities = completion.choices[0].message.content
+    
+    else:
+        messages = pipe.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        entities = pipe(messages, max_new_tokens=1024, do_sample=True, temperature=0.7, top_k=50, top_p=0.95)
+    
+    logging.info(f"Entities extracted: {entities}")
+    return entities
+
+
+def llm_generator(prompt_tmpl, pipe, using_generator):
+
+    messages = [
+                # {
+                #     "role": "system",
+                #     "content": "You are a friendly chatbot who always responds in the style of a pirate",
+                # },
+                {"role": "user", "content": prompt_tmpl},
+            ]
+    
+    if using_generator.find("gpt") != -1:
+        completion = openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages
+            )
+
+        # print(completion.choices[0].message.content)
+        pairs = completion.choices[0].message.content
+    
+    else:
+        messages = pipe.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        pairs = pipe(messages, max_new_tokens=2048, do_sample=True, temperature=0.7, top_k=50, top_p=0.95)
+    
+    logging.info(f"pairs extracted: {pairs}")
+    return pairs
+
+
 def init_llm_service_context(llm_model_name="HuggingFaceH4/zephyr-7b-alpha", 
                              tokenizer_name="HuggingFaceH4/zephyr-7b-alpha", 
                              embed_model_name="sentence-transformers/all-MiniLM-L6-v2",
                              quantization_config=quantization_config, 
+                             context_window=32768,
+                             max_new_tokens=256,
                              token=None, 
                              output_parser=None,):
     if "gpt" in llm_model_name:
         llm = OpenAI(model=llm_model_name, api_key=os.environ["OPENAI_API_KEY"], temperature=0.7)
-        embed_model = HuggingFaceEmbeddings(model_name='sentence-transformers/all-MiniLM-L6-v2')
+        # embed_model = OpenAIEmbedding(model_name="text-embeddings-ada-002", api_key=os.environ["OPENAI_API_KEY"])
+        embed_model = HuggingFaceEmbeddings(model_name=embed_model_name)
     else:
         llm = HuggingFaceLLM(
-            model_name=llm_model_name, 
-            tokenizer_name=tokenizer_name, 
-            context_window=2048,
-            max_new_tokens=256,
+            model_name=llm_model_name, # epfl-llm/meditron-7b
+            tokenizer_name=tokenizer_name, # epfl-llm/meditron-7b
+            # query_wrapper_prompt=PromptTemplate("<|system|>\n</s>\n<|user|>\n{query_str}</s>\n<|assistant|>\n"),
+            context_window=context_window,
+            max_new_tokens=max_new_tokens,
             model_kwargs={"quantization_config": quantization_config, "trust_remote_code": True},
             # tokenizer_kwargs={"trust_remote_code": True,},
             generate_kwargs={"temperature": 0.7, "top_k": 50, "top_p": 0.95, "do_sample": True},
@@ -215,20 +303,29 @@ def init_llm_service_context(llm_model_name="HuggingFaceH4/zephyr-7b-alpha",
         )
 
         embed_model = HuggingFaceEmbeddings(model_name=embed_model_name) 
-    service_context = ServiceContext.from_defaults(llm=llm, chunk_size=512, embed_model=embed_model)
-    logging.info(f"LLM loaded: {llm.model_name}" if "gpt" not in llm_model_name else f"LLM loaded: {llm.model}")
-    logging.info(f"embed_model loaded: {embed_model.model_name}")
-    logging.info("Service context created")
+    # service_context = ServiceContext.from_defaults(llm=llm, chunk_size=512, embed_model=embed_model)
+    Settings.llm = llm
+    Settings.embed_model = embed_model
+    logging.info(f"LLM loaded: {Settings.llm.model_name}" if "gpt" not in llm_model_name else f"LLM loaded: {Settings.llm.model}")
+    logging.info(f"embed_model loaded: {Settings.embed_model.model_name}")
+    logging.info("Settings loaded.")
 
-    return llm, service_context
+    return llm #, service_context
 
 
-def init_kg_storage_context(storage_dir="data/index/ade_full_graph_doc"):
+def init_kg_storage_context(llm, storage_dir="data/index/ade_full_graph_doc"):
     storage_context = StorageContext.from_defaults(persist_dir=storage_dir)
     logging.info(f"KG storage: {storage_dir}")
     logging.info("KG Storage context loaded")
 
-    return storage_context
+    kg_index = load_index_from_storage(
+        storage_context=storage_context,
+        # service_context=service_context,
+        llm=llm,
+    )
+    logging.info("KG index loaded")
+
+    return kg_index
 
 
 def init_vector_storage_context(storage_dir="data/index/ade_full_vector"):
@@ -236,27 +333,21 @@ def init_vector_storage_context(storage_dir="data/index/ade_full_vector"):
     logging.info(f"Vector storage: {storage_dir}")
     logging.info("Vector storage context loaded")
 
-    return storage_context
+    return storage_context   
 
 
-def init_rag_pipeline(llm, 
-                      service_context, 
-                      storage_context, 
+def init_rag_pipeline(kg_index,
                       include_text=False, 
                       similarity_top_k=3, 
                       graph_store_query_depth=2, 
+                      retriever_mode="hybrid",
                       verbose=False
                       ):
-    kg_index = load_index_from_storage(
-        storage_context=storage_context,
-        service_context=service_context,
-        llm=llm,
-    )
 
     kg_query_engine = kg_index.as_query_engine(
-        # setting to false uses the raw triplets instead of adding the text from the corresponding nodes
         include_text=include_text,
-        retriever_mode="hybrid",
+        # retriever_mode="hybrid",
+        retriever_mode=retriever_mode,
         embedding_mode="hybrid",
         response_mode="compact",
         similarity_top_k=similarity_top_k,
@@ -270,28 +361,31 @@ def init_rag_pipeline(llm,
 
 
 if __name__ == '__main__':
-    from llama_index.query_engine import RetrieverQueryEngine
-    from llama_index.retrievers import KnowledgeGraphRAGRetriever
+    pass
 
-    llm, service_context = init_llm_service_context()
-    storage_context = init_kg_storage_context()
+    # TODO the following code to test the functions from this file
+    # from llama_index.query_engine import RetrieverQueryEngine
+    # from llama_index.retrievers import KnowledgeGraphRAGRetriever
 
-    graph_rag_retriever = KnowledgeGraphRAGRetriever(
-        storage_context=storage_context,
-        service_context=service_context,
-        llm=llm,
-        verbose=True,
-    )
+    # llm, service_context = init_llm_service_context()
+    # storage_context = init_kg_storage_context()
 
-    query_engine = RetrieverQueryEngine.from_args(
-        graph_rag_retriever, service_context=service_context
-    )
-    logging.info("Query engine created")
+    # graph_rag_retriever = KnowledgeGraphRAGRetriever(
+    #     storage_context=storage_context,
+    #     service_context=service_context,
+    #     llm=llm,
+    #     verbose=True,
+    # )
 
-    response = query_engine.query(
-        "Generate triplets of disease which relate to cyclophosphamide with the format of (subject ; has adverse effect ; object), \
-            \
-            For example, (cyclophosphamide ; has adverse effect ; hemorrhagic cystitis)",
-        )
-    # display(Markdown(f"<b>{response}</b>"))
-    print(response.response)
+    # query_engine = RetrieverQueryEngine.from_args(
+    #     graph_rag_retriever, service_context=service_context
+    # )
+    # logging.info("Query engine created")
+
+    # response = query_engine.query(
+    #     "Generate triplets of disease which relate to cyclophosphamide with the format of (subject ; has adverse effect ; object), \
+    #         \
+    #         For example, (cyclophosphamide ; has adverse effect ; hemorrhagic cystitis)",
+    #     )
+    # # display(Markdown(f"<b>{response}</b>"))
+    # print(response.response)
