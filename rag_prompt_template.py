@@ -149,7 +149,7 @@ Answer End:::\
 Requirements:\
 You MUST provide values for 'Pairs:' in your answer. \
 ONLY use the type in the type list: [Disorder, Substance].\
-Extract as many valid entity-type pairs as possible from the given context abstract.\
+ONLY output valid entity-type pairs without any reasoning.
 
 """
 
@@ -243,6 +243,35 @@ Requirements:\
 You MUST provide values for 'Concepts:' in your answer. \
 ONLY extract concepts, DO NOT include the type of the concept, reasoning, or any other information. \
 DO NOT include mark numbers or ordinal numbers in your answer. \
+Extract as many unique concepts as possible from the given context. \
+
+"""
+
+
+# ======================================
+# MIMIC-IV deepseek snomed entity extraction
+# ======================================
+MIMICIV_deepseek_entity_extraction_prompt = """\
+Here is the context: {text}.\
+
+Task: Extract the SNOMED CT concepts from the given context.\
+
+The steps are as follows:\
+1. extract the concepts from the given context sentence, using the retrieved triplets.
+2. there may be abbreviations or acronyms in the context, extract them as concepts as well if they are related to the concepts.
+3. output the concepts in a list [] strictly, each concept is separated by a comma.\
+\
+
+Provide your answer as follows:
+
+Answer:::
+Concepts: [] \
+Answer End:::\
+
+Requirements:\
+You MUST provide values for 'Concepts:' in your answer. \
+ONLY extract concepts, DO NOT include the type of the concept, reasoning, or any other information. \
+DO NOT include the chain of thought in the answer. \
 Extract as many unique concepts as possible from the given context. \
 
 """
@@ -367,3 +396,32 @@ ONLY output the triples without any other information.\
 """
 
 prompt_var_mappings = {"text": "text"}
+
+
+# ======================================
+# Human-dx snomed entity extraction
+# ======================================
+Humandx_entity_extraction_prompt = """\
+Here is the context: {text}.
+
+Task: Extract the SNOMED CT concepts from the given context.
+
+The steps are as follows:
+1. extract the concepts from the given context sentence, using the retrieved triplets.
+2. there may be abbreviations or acronyms in the context, extract them as concepts as well if they are related to the concepts.
+3. output the concepts in a list [] strictly, each concept is separated by a comma.
+
+
+Provide your answer as follows:
+
+Answer:::
+Concepts: []
+Answer End:::
+
+Requirements:
+You MUST provide values for 'Concepts:' in your answer. 
+ONLY extract concepts, DO NOT include the type of the concept, reasoning, or any other information. 
+DO NOT include mark numbers or ordinal numbers in your answer. 
+Extract as many unique concepts as possible from the given context. 
+
+"""
