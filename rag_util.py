@@ -30,6 +30,40 @@ def format_response(response):
 
     return response
 
+def prepare_hdx(human_dx):
+    logging.info(f"Count of human experts: {len(human_dx)}")
+
+    # all_human_dx = []
+    # for dx in human_dx:
+    #     all_human_dx += dx
+    # logging.info(f"Count of human expert diagnoses: {len(all_human_dx)}")
+    # all_human_dx = list(set(all_human_dx))
+    # logging.info(f"Count of unique human expert diagnoses: {len(all_human_dx)}")
+
+    # all_human_dx = ', '.join(all_human_dx)
+
+    all_human_dx = '. '.join(human_dx)
+    
+    return all_human_dx
+
+
+def prepare_retrieval(material, retriever):
+
+    if isinstance(material, list):
+        logging.info(f"Retrieving for {len(material)} human expert diagnoses")
+        material_for_retrieval = '. '.join(material)
+    elif isinstance(material, str):
+        logging.info(f"Retrieving for {material[:100]}...")
+        material_for_retrieval = material
+
+    retrieved_triples = retriever.retrieve(material_for_retrieval)
+    retrieved_triples = list(dict.fromkeys(retrieved_triples[0].node.metadata['kg_rel_texts'])) # remove duplicates
+    logging.info(f"Retrieved {len(retrieved_triples)} triples")
+
+    retrieval = ", ".join(retrieved_triples) # join the triples with a comma into a single string
+
+    return retrieval
+
 def clean_structural_list(parsed_response, target_results):
     def fix_unmatched_quotes(text):
         single_quotes = text.count("'")

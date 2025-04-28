@@ -27,7 +27,8 @@ LLM = {
     "mistralsmall": "llm/Mistral-Small-Instruct-2409",
     "llama3.18b": "llm/Llama-3.1-8B-Instruct",
     "gpt-4o-mini": "gpt-4o-mini",
-    "nuparser": "llm/NuExtract-1.5-tiny",
+    "nuparser-tiny": "llm/NuExtract-1.5-tiny",
+    "nuparser": "llm/NuExtract-1.5",
 }
 
 
@@ -256,6 +257,25 @@ def init_vector_storage_context(storage_dir="data/index/ade_full_vector"):
     logging.info("Vector storage context loaded")
 
     return storage_context   
+
+
+def init_retriever(kg_index,
+                   include_text=False,
+                   similarity_top_k=10,
+                   graph_store_query_depth=2,
+                   retriever_mode="hybrid",
+                   verbose=False,
+                   ):
+    
+    retriever = kg_index.as_retriever(
+        similarity_top_k=similarity_top_k,
+        graph_store_query_depth=graph_store_query_depth,
+        verbose=verbose,
+        retriever_mode=retriever_mode,
+    )
+
+    logging.info(f"Retriever created, retriever: {type(retriever)}, retriever_mode: {retriever_mode}")
+    return retriever
 
 
 # Aggregated RAG pipeline module, used for initializing the RAG pipeline
