@@ -1,0 +1,15 @@
+/archive/
+/data_main/
+/CMA/
+/eval/
+/grammarllm/
+/index/
+/IOU/
+/logs/
+/llm/
+/results/
+/results_diagnosis/
+/snomed_embedding/
+/temp_scripts/
+__pycache__/
+.env

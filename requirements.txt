@@ -1,0 +1,12 @@
+huggingface_hub==0.23.2
+ipython==8.12.3
+langchain==0.3.0
+llama_index==0.11.10
+numpy==1.24.4
+pandas==2.0.3
+Requests==2.32.3
+tensorflow==2.17.0
+tokenizers==0.20.0
+torch==2.2.0+cu118
+tqdm==4.66.4
+transformers==4.41.2
