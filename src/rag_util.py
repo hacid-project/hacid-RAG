@@ -6,8 +6,6 @@ import sys, re
 import logging
 import ast
 from transformers import BitsAndBytesConfig, pipeline, AutoModelForCausalLM, AutoTokenizer
-import openai
-from openai import OpenAI
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY") if os.getenv("DEEPSEEK_API_KEY") else ""
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") if os.getenv("OPENAI_API_KEY") else ""
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY") if os.getenv("NVIDIA_API_KEY") else ""

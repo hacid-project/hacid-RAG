@@ -4,7 +4,6 @@ import sys, re
 import logging
 from transformers import BitsAndBytesConfig, pipeline, AutoModelForCausalLM, AutoTokenizer
 from sklearn.metrics.pairwise import cosine_similarity
-import ollama
 import numpy as np
 from collections import defaultdict
 import openai
@@ -18,7 +17,6 @@ from llama_index.core import KnowledgeGraphIndex, Settings, ServiceContext, Simp
 from llama_index.core.storage.storage_context import StorageContext
 from llama_index.core.graph_stores import SimpleGraphStore
 from llama_index.llms.openai import OpenAI
-from llama_index.llms.openai_like import OpenAILike
 from llama_index.llms.huggingface import HuggingFaceLLM
 from llama_index.llms.huggingface_api import HuggingFaceInferenceAPI
 from llama_index.core.prompts import PromptTemplate
@@ -241,7 +239,7 @@ def init_llm_service_context(llm_model_name="HuggingFaceH4/zephyr-7b-alpha",
             # tokenizer_kwargs={"trust_remote_code": True,},
             generate_kwargs={"temperature": 0.65, "top_k": 50, "top_p": 0.95, "do_sample": True},
             # messages_to_prompt=messages_to_prompt,
-            device_map="auto",
+            # device_map="auto",
             output_parser=output_parser,
         )
 
@@ -289,23 +287,6 @@ def init_vector_storage_context(storage_dir="data/index/ade_full_vector"):
     return storage_context   
 
 
-# class CustomKGTableRetriever(KGTableRetriever):
-#     def _get_keywords(self, query_str: str) -> List[str]:
-#         response = self._llm.predict(
-#             self.query_keyword_extract_template or DEFAULT_KEYWORD_EXTRACT_TEMPLATE,
-#             max_keywords=self.max_keywords_per_query,
-#             question=query_str,
-#         )
-#         keywords = extract_keywords_given_response(
-#             response, start_token="KEYWORDS:", lowercase=False
-#         )
-#
-#         # capitalize the first letter of each keyword
-#         processed_keywords = [keyword.capitalize() for keyword in keywords]
-#
-#         return processed_keywords
-
-
 class CustomKGTableRetriever(KGTableRetriever):
 
     def __init__(self, *args, **kwargs):
@@ -313,6 +294,7 @@ class CustomKGTableRetriever(KGTableRetriever):
         
         # Ollama embedding model configuration
         self.embedding_model = 'nomic-embed-text:137m-v1.5-fp16'
+        logging.info(f"CustomKGTableRetriever is using the embedding model: {self.embedding_model}")
         
         # The predefined list of relation predicates
         self.relation_predicates = [
@@ -372,7 +354,7 @@ class CustomKGTableRetriever(KGTableRetriever):
             
         except Exception as e:
             print(f"[DEBUG] Ollama embedding computation failed: {e}")
-            # 返回零向量作为fallback
+            # return zero vector as fallback
             return np.zeros((1, 768))  # assuming 768-dim embeddings
 
     def parse_triple_string(self, triple_str):
@@ -452,10 +434,10 @@ class CustomKGTableRetriever(KGTableRetriever):
         subj, rel, obj = triple
         
         try:
-            # 1. 整体三元组相似度
+            # 1. Overall triple similarity
             overall_sim = self.compute_semantic_similarity(query_text, triple)
             
-            # 2. 实体级别相似度
+            # 2. Entity-level similarity
             query_embedding = self.get_ollama_embedding(query_text)
             
             # 分别计算subject和object的相似度
@@ -467,10 +449,10 @@ class CustomKGTableRetriever(KGTableRetriever):
             
             max_entity_sim = max(subj_sim, obj_sim)
             
-            # 3. 关系权重
+            # 3. Relation weighting
             relation_weight = 1.2 if rel in self.important_relations else 1.0
             
-            # 4. 综合计算
+            # 60% overall + 40% entity-level, then apply relation weight
             final_score = (0.6 * overall_sim + 0.4 * max_entity_sim) * relation_weight
             
             return min(final_score, 1.0)
@@ -616,6 +598,12 @@ class CustomKGTableRetriever(KGTableRetriever):
         print(f"[DEBUG] Hybrid scoring retrieval done, returning {len(processed_triples)} triples")
         return processed_triples
 
+
+# Ensure Ollama is installed
+try:
+    import ollama
+except ImportError:
+    raise ImportError("The 'ollama' package is required but not installed. Please install it using 'pip install ollama'.")
 
 def init_retriever(kg_index,
                    include_text=False,

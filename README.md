@@ -10,18 +10,6 @@ This project implements a RAG system specifically designed for medical and healt
 
 ## Features
 
-- Support for multiple LLM models:
-  - Mistral Small
-  - Llama 3.1 8B
-  - GPT-4
-  - NuExtract models
-  - Custom models through HuggingFace
-
-- Multiple embedding models:
-  - BGE-M3
-  - MiniLM variants
-  - HiT-MiniLM-L12-SnomedCT
-
 - Specialized medical concept extraction and processing:
   - SNOMED CT concept extraction
   - Medical entity recognition
@@ -73,99 +61,13 @@ HACID_RAG/
 
 ## Notebooks
 
-The `notebooks/` directory contains Jupyter notebooks for experimentation, testing, and demonstration of the RAG system's capabilities:
+The `notebooks/` directory contains Jupyter notebooks for experimentation, testing, and demonstration of the RAG system's capabilities. For detailed descriptions of each notebook's features, pipeline, and examples, see [`notebooks/README.md`](notebooks/README.md).
 
-### `rag_playground.ipynb`
-**Main interactive playground for comprehensive RAG system testing**
-
-**Pipeline Features:**
-- Complete RAG pipeline initialization with configurable LLM and embedding models
-- Knowledge graph retrieval with hybrid similarity search
-- Medical text processing for multiple NLP tasks
-- Structured output parsing and validation
-
-**Key Examples:**
-
-1. **Pure Retrieval Testing**
-   - Input: Medical case vignette (e.g., "40 year old female presenting with chest pain...")
-   - Output: Retrieved knowledge graph triples related to symptoms and conditions
-
-2. **Question-Answering**
-   - Input: "What is the type of the concept 'Biliary pancreatitis'?"
-   - Output: SNOMED CT concept type classification
-
-3. **Medical Concept Extraction**
-   - Input: Discharge note text with medical history
-   - Output: Extracted SNOMED CT concepts categorized by type (finding, disorder, procedure, etc.)
-
-4. **Entity-Type Pair Extraction**
-   - Input: Medical abstract about drug effects
-   - Output: Structured pairs like "(depression ; Disorder)" and "(methyl dopa ; Substance)"
-
-5. **Triple Extraction**
-   - Input: Research abstract about surgical procedures
-   - Output: Medical knowledge triples in format "(concept1 ; relation ; concept2)"
-
-6. **Medical Diagnosis Generation**
-   - Input: Clinical case vignette with symptoms
-   - Output: Ranked differential diagnoses based on probability
-
-### `retriever_test.ipynb`
-**Focused testing and comparison of retrieval components**
-
-**Pipeline Features:**
-- Systematic evaluation of default vs custom retrievers
-- Performance comparison with different similarity thresholds
-- Knowledge graph exploration with configurable depth parameters
-
-**Key Examples:**
-
-1. **Default Retriever Testing**
-   - Input: Complex medical text about cerebrospinal fluid leakage
-   - Output: Top-K most relevant triples from knowledge graph
-
-2. **Custom Retriever with Enhanced Features**
-   - Input: Same medical text as above
-   - Output: Filtered and ranked results with additional semantic scoring
-   - Features: Relation-specific filtering, similarity thresholds, hybrid scoring
-
-### `RAG_format_enforcer.ipynb`
-**Triple extraction with structured output enforcement**
-
-**Pipeline Features:**
-- Medical abstract processing for SNOMED CT knowledge extraction
-- Format enforcement to ensure consistent triple structure
-- Hybrid extraction engine combining RAG retrieval with structured generation
-
-**Key Examples:**
-
-1. **Medical Abstract Processing**
-   - Input: Research abstracts about surgical procedures (thyroidectomy, cardiac conditions)
-   - Output: Structured triples with enforced format: `[(subject; predicate; object), ...]`
-
-2. **Format-Enforced Extraction**
-   - Input: "Traditional thyroidectomy results in neck scar..."
-   - Output: Validated triples like "(thyroidectomy; associated with; neck scar)" with guaranteed formatting
-
-### `RAG_grammarllm.ipynb`
-**Grammar-constrained generation for reliable structured outputs**
-
-**Pipeline Features:**
-- Context-aware triple extraction using grammar-based constraints
-- Integration with knowledge graph retrieval for enhanced accuracy
-- Systematic evaluation on PubMed datasets with predefined relation vocabularies
-
-**Key Examples:**
-
-1. **Grammar-Constrained Triple Generation**
-   - Input: Medical text about clinical procedures and findings
-   - Output: Syntactically valid triples conforming to predefined grammar rules
-   - Format: Enforced structure `[(SUBJECT; PREDICATE; OBJECT), ...]`
-
-2. **Dataset Evaluation Pipeline**
-   - Input: PubMed research abstracts from evaluation datasets
-   - Output: Batch-processed triples with quality metrics and validation
-   - Features: Automated evaluation, performance tracking, constrained vocabulary
+### Available Notebooks:
+- **`rag_playground.ipynb`** - Main interactive playground for comprehensive RAG system testing
+- **`retriever_test.ipynb`** - Focused testing and comparison of retrieval components
+- **`RAG_format_enforcer.ipynb`** - Triple extraction with structured output enforcement
+- **`RAG_grammarllm.ipynb`** - Grammar-constrained generation for reliable structured outputs
 
 ## Installation
 
@@ -175,10 +77,12 @@ The `notebooks/` directory contains Jupyter notebooks for experimentation, testi
 pip install -r requirements.txt
 ```
 
-3. Set up environment variables:
+### Additional Installation Step
+
+Ensure you have the `ollama` package installed, as it is required for embedding computations in the Custom RAG retriever in the [src/rag_moduler.py](https://github.com/hacid-project/hacid-RAG/blob/master/src/rag_moduler.py). You can install it using the following command:
+
 ```bash
-export OPENAI_API_KEY="your_openai_api_key"
-export DEEPSEEK_API_KEY="your_deepseek_api_key"
+pip install ollama
 ```
 
 ## Quick Usage
