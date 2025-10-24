@@ -22,6 +22,7 @@ This project implements a RAG system specifically designed for medical and healt
 HACID_RAG/
 ├── README.md                    # Project documentation
 ├── requirements.txt             # Python dependencies
+├── requirements_minimal.txt    # The top-level necessary dependencies
 ├── .gitignore                  # Git ignore rules
 ├── .env.template               # Environment variables template
 ├── data/                       # Data storage directory
@@ -38,6 +39,8 @@ HACID_RAG/
 ├── scripts/                    # Utility scripts (currently empty)
 └── src/                        # Source code directory
     ├── rag_moduler.py          # Core RAG functionality and LLM pipeline
+    ├── llm_factory.py          # Modular factory for building LLMs and embedding models
+    ├── rag_auxiliaries         # Auxiliary LLM utilities (extractor, parser, generator)
     ├── rag_prompt_template.py  # Prompt templates for various tasks
     ├── rag_util.py            # Utility functions
     ├── llm_extraction.py      # LLM-based extraction utilities
@@ -72,10 +75,26 @@ The `notebooks/` directory contains Jupyter notebooks for experimentation, testi
 ## Installation
 
 1. Clone the repository
-2. Install dependencies:
+
+2. (Recommended) Create a Python 3.10 environment:
+```bash
+conda create -n hacid_rag python=3.10
+conda activate hacid_rag
+```
+
+3. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
+
+### requirements.txt vs requirements_minimal.txt
+
+- **requirements.txt**: Contains all packages (including sub-dependencies and system/conda packages) from a full environment export. Use this for exact environment replication.
+- **requirements_minimal.txt**: Contains only the top-level, necessary Python packages. All other dependencies will be installed automatically. Use this for a cleaner, more portable, and easier-to-maintain setup.
+
+**Recommendation:**
+- Use `requirements.txt` for legacy or debugging purposes.
+- Use `requirements_minimal.txt` for new installations or lightweight environments.
 
 ### Additional Installation Step
 
@@ -156,15 +175,53 @@ print(response)
    - Knowledge graph storage
    - Hybrid retrieval
 
+## Recent Updates
+
+### New Modular Architecture (v0.2)
+
+The codebase has been refactored to improve modularity and maintainability:
+
+#### New File: `llm_factory.py`
+A dedicated factory module for building and managing LLMs and embedding models:
+- **`build_hf_transformers()`**: Explicitly load HuggingFace models with fine-grained control over quantization, device mapping, and memory management
+- **`wrap_hf_llm()`**: Wrap Transformers models into LlamaIndex `HuggingFaceLLM` objects
+- **`build_llm_by_name()`**: Factory method supporting multiple LLM types (HuggingFace, OpenAI, DeepSeek)
+- **`build_embed_model()`**: Create embedding models with consistent interface
+- **`configure_global_settings()`**: Set global LLM and embedding model settings
+- **`release_model()`**: Properly release models and free GPU memory
+
+#### New File: `rag_auxiliaries`
+Auxiliary LLM utilities extracted from the original `rag_moduler.py` for better code organization:
+- **`init_llm_pipeline()`**: Initialize LLM pipeline for extractors, parsers, and generators
+- **`llm_entity_extractor()`**: Extract entities from text using LLM
+- **`llm_parser()`**: Parse RAG or LLM extractor outputs
+- **`llm_generation()`**: Generate responses from LLM models
+
+#### Modified: `rag_moduler.py`
+Core RAG functionality now leverages the new factory pattern and has been streamlined:
+- Imports and uses functions from `llm_factory.py` for all model initialization
+- Moved auxiliary LLM functions (extractors, parsers, generators) to `rag_auxiliaries`
+- Simplified `init_llm_service_context()` by delegating model loading to factory functions
+- Improved `init_kg_storage_context()` with better embedding model handling
+- Enhanced `CustomKGTableRetriever` with Ollama-based semantic similarity computation
+- Added `swap_llm_and_rebuild_engine()` for dynamic LLM switching (experimental)
+
+These changes provide:
+- **Better separation of concerns**: Model management is isolated from RAG logic
+- **Improved memory management**: Explicit control over model loading and release
+- **Enhanced flexibility**: Easier to add new LLM providers or modify model configurations
+- **Cleaner code**: Reduced duplication and improved maintainability
+
 ## Configuration
 
-The system supports various configurations through the `rag_moduler.py` file:
+The system supports various configurations through the `llm_factory.py` and `rag_moduler.py` files:
 
-- LLM model selection
+- LLM model selection (HuggingFace, OpenAI, DeepSeek)
 - Embedding model selection
-- Quantization settings
+- Quantization settings (4-bit, 8-bit)
 - Context window size
 - Temperature and sampling parameters
+- Device mapping and memory optimization
 
 ## Contributing
 

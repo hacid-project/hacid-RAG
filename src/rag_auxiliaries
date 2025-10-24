@@ -1,0 +1,131 @@
+import os, json, ast
+import torch
+import sys, re
+import logging
+from transformers import BitsAndBytesConfig, pipeline, AutoModelForCausalLM, AutoTokenizer
+import openai
+from openai import OpenAI
+from rag_modeler import LLM
+
+# LLM pipeline module, used for initializing the LLM model for extractors, parsers, and generators
+def init_llm_pipeline(llm_model_name, quantization_config=quantization_config):
+
+    if llm_model_name.find("gpt") != -1:
+        pipe = OpenAI()
+        
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(LLM["mistralsmall"])
+        model = AutoModelForCausalLM.from_pretrained(llm_model_name, 
+                                                     device_map="auto",
+                                                     torch_dtype="auto", 
+                                                     quantization_config=quantization_config,
+                                                     trust_remote_code=True,)
+        
+        pipe = pipeline("text-generation", model=model, tokenizer=tokenizer)
+        # pipe = pipeline("text-generation", model=model)
+
+    logging.info(f"LLM pipeline built: {llm_model_name}")
+    return pipe
+
+
+# LLM entity extractor module, a seperate module used for extracting entities from the text
+def llm_entity_extractor(text, pipe, using_extractor):
+    prompt_tmpl = f"Extract all entities exhaustively from the following text: {text}. \n ONLY respond with the ENTITIES without any reasoning. \n Entities: []"
+
+    messages = [
+                # {
+                #     "role": "system",
+                #     "content": "You are a friendly chatbot who always responds in the style of a pirate",
+                # },
+                {"role": "user", "content": prompt_tmpl.format(text=text)},
+            ]
+    
+    if using_extractor.find("gpt") != -1:
+        completion = openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages
+            )
+
+        # print(completion.choices[0].message.content)
+        entities = completion.choices[0].message.content
+    
+    else:
+        messages = pipe.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        entities = pipe(messages, max_new_tokens=2048, do_sample=True, temperature=0.7, top_k=100, top_p=0.95)
+    
+    logging.info(f"Entities extracted: {entities}")
+    return entities
+
+
+# LLM Parser module, used for parsing the output of the RAG or LLM extractor
+def llm_parser(text, pipe, using_parser="nuparser", target_results="Concepts"):
+
+    prompt_tmpl = f"Here is the result of RAG: {text}. \n Parse the result by extracting all {target_results} and removing all repetitions. \n {target_results}: []"
+
+    messages = [ {"role": "user", 
+                  "content": prompt_tmpl.format(text=text)} 
+                  ]
+    
+    if using_parser.find("gpt") != -1:
+        completion = openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages
+            )
+
+        results = completion.choices[0].message.content
+
+    elif using_parser.find("nuparser") != -1:
+        parser_template = """{
+            "%s": []
+        }""" % target_results
+        parser_template = json.dumps(json.loads(parser_template), indent=4)
+        prompt = f"""<|input|>\n### Template:\n{parser_template}\n### Text:\n{text}\n\n<|output|>"""
+        
+        with torch.no_grad():
+            messages = pipe.tokenizer(prompt, return_tensors="pt", truncation=True, padding=True, max_length=10000).to(pipe.model.device)
+
+            pred_ids = pipe.model.generate(**messages, max_new_tokens=4000)
+            results = pipe.tokenizer.batch_decode(pred_ids, skip_special_tokens=True)
+
+            results = results[0].split("<|output|>")[1]
+
+    else:
+        messages = pipe.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        results = pipe(messages, 
+                    max_new_tokens=2048, 
+                    do_sample=True, 
+                    temperature=0.7, 
+                    repetition_penalty=1.5,
+                    top_k=10, 
+                    top_p=0.95)
+    
+    # print(f"{target_results} extracted: {results}")
+    return results
+
+
+# LLM generator module, used for generating the response from the LLM model
+def llm_generation(prompt_tmpl, pipe, using_generator):
+
+    messages = [
+                # {
+                #     "role": "system",
+                #     "content": "You are a friendly chatbot who always responds in the style of a pirate",
+                # },
+                {"role": "user", "content": prompt_tmpl},
+            ]
+    
+    if using_generator.find("gpt") != -1:
+        completion = openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages
+            )
+
+        # print(completion.choices[0].message.content)
+        results = completion.choices[0].message.content
+    
+    else:
+        messages = pipe.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        results = pipe(messages, max_new_tokens=512, do_sample=True, temperature=0.05, top_k=50, top_p=0.95)
+    
+    # logging.info(f"Extractions: {results}")
+    return results

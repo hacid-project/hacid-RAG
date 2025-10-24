@@ -8,10 +8,12 @@ import numpy as np
 from collections import defaultdict
 import openai
 from openai import OpenAI
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY") if os.getenv("DEEPSEEK_API_KEY") else ""
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") if os.getenv("OPENAI_API_KEY") else ""
-NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY") if os.getenv("NVIDIA_API_KEY") else ""
-os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
+api_keys = {
+    "DEEPSEEK_API_KEY": os.getenv("DEEPSEEK_API_KEY") if os.getenv("DEEPSEEK_API_KEY") else "",
+    "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY") if os.getenv("OPENAI_API_KEY") else "",
+    "NVIDIA_API_KEY": os.getenv("NVIDIA_API_KEY") if os.getenv("NVIDIA_API_KEY") else "",
+}
+os.environ["OPENAI_API_KEY"] = api_keys["OPENAI_API_KEY"]
 
 from llama_index.core import KnowledgeGraphIndex, Settings, ServiceContext, SimpleDirectoryReader, download_loader, load_index_from_storage
 from llama_index.core.storage.storage_context import StorageContext
@@ -27,9 +29,14 @@ from llama_index.core.prompts.default_prompts import DEFAULT_KEYWORD_EXTRACT_TEM
 from llama_index.core.indices.keyword_table.utils import extract_keywords_given_response
 from llama_index.core.query_engine.retriever_query_engine import RetrieverQueryEngine
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
-from utils.deepseek_llm import DeepSeek
+from llm_factory import *
 # from langchain.embeddings.huggingface import HuggingFaceEmbeddings
 # from llama_index.core.embeddings.openai import OpenAIEmbedding
+# Ensure Ollama is installed
+try:
+    import ollama
+except ImportError:
+    raise ImportError("The 'ollama' package is required but not installed. Please install it using 'pip install ollama'.")
 
 LLM = {
     "commandr": "../llm/c4ai-command-r-v01-4bit",
@@ -87,130 +94,6 @@ def messages_to_prompt(messages):
     return prompt
 
 
-# LLM pipeline module, used for initializing the LLM model for extractors, parsers, and generators
-def init_llm_pipeline(llm_model_name, quantization_config=quantization_config):
-
-    if llm_model_name.find("gpt") != -1:
-        pipe = OpenAI()
-        
-    else:
-        tokenizer = AutoTokenizer.from_pretrained(LLM["mistralsmall"])
-        model = AutoModelForCausalLM.from_pretrained(llm_model_name, 
-                                                     device_map="auto",
-                                                     torch_dtype="auto", 
-                                                     quantization_config=quantization_config,
-                                                     trust_remote_code=True,)
-        
-        pipe = pipeline("text-generation", model=model, tokenizer=tokenizer)
-        # pipe = pipeline("text-generation", model=model)
-
-    logging.info(f"LLM pipeline built: {llm_model_name}")
-    return pipe
-
-
-# LLM entity extractor module, a seperate module used for extracting entities from the text
-def llm_entity_extractor(text, pipe, using_extractor):
-    prompt_tmpl = f"Extract all entities exhaustively from the following text: {text}. \n ONLY respond with the ENTITIES without any reasoning. \n Entities: []"
-
-    messages = [
-                # {
-                #     "role": "system",
-                #     "content": "You are a friendly chatbot who always responds in the style of a pirate",
-                # },
-                {"role": "user", "content": prompt_tmpl.format(text=text)},
-            ]
-    
-    if using_extractor.find("gpt") != -1:
-        completion = openai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=messages
-            )
-
-        # print(completion.choices[0].message.content)
-        entities = completion.choices[0].message.content
-    
-    else:
-        messages = pipe.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        entities = pipe(messages, max_new_tokens=2048, do_sample=True, temperature=0.7, top_k=100, top_p=0.95)
-    
-    logging.info(f"Entities extracted: {entities}")
-    return entities
-
-
-# LLM Parser module, used for parsing the output of the RAG or LLM extractor
-def llm_parser(text, pipe, using_parser="nuparser", target_results="Concepts"):
-
-    prompt_tmpl = f"Here is the result of RAG: {text}. \n Parse the result by extracting all {target_results} and removing all repetitions. \n {target_results}: []"
-
-    messages = [ {"role": "user", 
-                  "content": prompt_tmpl.format(text=text)} 
-                  ]
-    
-    if using_parser.find("gpt") != -1:
-        completion = openai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=messages
-            )
-
-        results = completion.choices[0].message.content
-
-    elif using_parser.find("nuparser") != -1:
-        parser_template = """{
-            "%s": []
-        }""" % target_results
-        parser_template = json.dumps(json.loads(parser_template), indent=4)
-        prompt = f"""<|input|>\n### Template:\n{parser_template}\n### Text:\n{text}\n\n<|output|>"""
-        
-        with torch.no_grad():
-            messages = pipe.tokenizer(prompt, return_tensors="pt", truncation=True, padding=True, max_length=10000).to(pipe.model.device)
-
-            pred_ids = pipe.model.generate(**messages, max_new_tokens=4000)
-            results = pipe.tokenizer.batch_decode(pred_ids, skip_special_tokens=True)
-
-            results = results[0].split("<|output|>")[1]
-
-    else:
-        messages = pipe.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        results = pipe(messages, 
-                    max_new_tokens=2048, 
-                    do_sample=True, 
-                    temperature=0.7, 
-                    repetition_penalty=1.5,
-                    top_k=10, 
-                    top_p=0.95)
-    
-    # print(f"{target_results} extracted: {results}")
-    return results
-
-
-# LLM generator module, used for generating the response from the LLM model
-def llm_generation(prompt_tmpl, pipe, using_generator):
-
-    messages = [
-                # {
-                #     "role": "system",
-                #     "content": "You are a friendly chatbot who always responds in the style of a pirate",
-                # },
-                {"role": "user", "content": prompt_tmpl},
-            ]
-    
-    if using_generator.find("gpt") != -1:
-        completion = openai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=messages
-            )
-
-        # print(completion.choices[0].message.content)
-        results = completion.choices[0].message.content
-    
-    else:
-        messages = pipe.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        results = pipe(messages, max_new_tokens=512, do_sample=True, temperature=0.05, top_k=50, top_p=0.95)
-    
-    # logging.info(f"Extractions: {results}")
-    return results
-
-
 # LLM service context module in the RAG pipeline, used for initializing the LLM model and the embedding model 
 def init_llm_service_context(llm_model_name="HuggingFaceH4/zephyr-7b-alpha", 
                              tokenizer_name="HuggingFaceH4/zephyr-7b-alpha", 
@@ -218,75 +101,155 @@ def init_llm_service_context(llm_model_name="HuggingFaceH4/zephyr-7b-alpha",
                              quantization_config=quantization_config, 
                              context_window=32768,
                              max_new_tokens=256,
-                             token=None, 
-                             output_parser=None,):
-    if "gpt" in llm_model_name:
-        llm = OpenAI(model=llm_model_name, api_key=OPENAI_API_KEY, temperature=0.7)
-        # embed_model = OpenAIEmbedding(model_name="text-embeddings-ada-002", api_key=os.environ["OPENAI_API_KEY"])
-        embed_model = HuggingFaceEmbeddings(model_name=embed_model_name)
-    elif "deepseek" in llm_model_name:
-        logging.info("Using Deepseek API")
-        llm = DeepSeek(model=llm_model_name, api_key=DEEPSEEK_API_KEY, temperature=0.7)
-        embed_model = HuggingFaceEmbeddings(model_name=embed_model_name)
-    else:
-        llm = HuggingFaceLLM(
-            model_name=llm_model_name, # epfl-llm/meditron-7b
-            tokenizer_name=tokenizer_name, # epfl-llm/meditron-7b
-            # query_wrapper_prompt=PromptTemplate("<|system|>\n</s>\n<|user|>\n{query_str}</s>\n<|assistant|>\n"),
-            context_window=context_window,
-            max_new_tokens=max_new_tokens,
-            model_kwargs={"quantization_config": quantization_config, "trust_remote_code": True},
-            # tokenizer_kwargs={"trust_remote_code": True,},
-            generate_kwargs={"temperature": 0.65, "top_k": 50, "top_p": 0.95, "do_sample": True},
-            # messages_to_prompt=messages_to_prompt,
-            # device_map="auto",
-            output_parser=output_parser,
-        )
+                             ):
+    
+    embed_model = build_embed_model(embed_model_name)
+    model, tokenizer = build_hf_transformers(
+        llm_model_name,
+        device_map="auto",
+        torch_dtype=torch.float16,
+        trust_remote_code=True,
+        quantization_config=quantization_config,
+    )
+    hf_llm = wrap_hf_llm(model, tokenizer, context_window=context_window, max_new_tokens=max_new_tokens)
+    configure_global_settings(hf_llm, embed_model)
 
-        # llm = HuggingFaceInferenceAPI(
-        #     model_name="mistralai/Mistral-Small-Instruct-2409",
-        #     temperature=0.7,
-        #     context_window=context_window,
-        #     max_tokens=max_new_tokens,
-        #     token="",  # Optional
-        # )
-
-        embed_model = HuggingFaceEmbeddings(model_name=embed_model_name) 
-    # service_context = ServiceContext.from_defaults(llm=llm, chunk_size=512, embed_model=embed_model)
-    Settings.llm = llm
-    Settings.embed_model = embed_model
-    logging.info(f"LLM loaded: {Settings.llm.model_name}" if not isinstance(Settings.llm, OpenAI) else f"LLM loaded: {Settings.llm.model}")
-    logging.info(f"embed_model loaded: {Settings.embed_model.model_name}")
-    logging.info("Settings loaded.")
-
-    return llm #, service_context
+    return hf_llm
 
 
 # KG storage context module in the RAG pipeline, used for initializing the KG index
-def init_kg_storage_context(llm, storage_dir="data/index/ade_full_graph_doc"):
+def init_kg_storage_context(storage_dir: str, llm=None, embed_model=None, embed_model_name=None):
+    # 1) set global embedding first to avoid fallback to inconsistent dimension with the index
+    if embed_model is None and embed_model_name is not None:
+        embed_model = build_embed_model(embed_model_name)
+
+    if embed_model is not None:
+        Settings.embed_model = embed_model  # fix the embedding model before loading the index
+        print(f"Global embed_model set to: {getattr(Settings.embed_model, 'model_name', 'unknown')}")
+    # 2) load the index
     storage_context = StorageContext.from_defaults(persist_dir=storage_dir)
     logging.info(f"KG storage: {storage_dir}")
     logging.info("KG Storage context loaded")
 
     kg_index = load_index_from_storage(
         storage_context=storage_context,
-        # service_context=service_context,
-        llm=llm,
+        llm=llm,  # Optional: if certain components need to be aware of llm at load time
     )
     logging.info("KG index loaded")
-
     return kg_index
 
 
-# Vector storage context module in the RAG pipeline, used for initializing the vector storage
-def init_vector_storage_context(storage_dir="data/index/ade_full_vector"):
-    storage_context = StorageContext.from_defaults(persist_dir=storage_dir)
-    logging.info(f"Vector storage: {storage_dir}")
-    logging.info("Vector storage context loaded")
+# Build KG Query Engine with optional LLM switching
+def build_kg_query_engine(
+    kg_index,
+    *,
+    llm=None,
+    include_text=False,
+    retriever_mode="hybrid",     # "keyword" | "embedding" | "hybrid"
+    embedding_mode="hybrid",
+    response_mode="compact",
+    similarity_top_k=30,
+    graph_store_query_depth=5,
+    verbose=False,
+):
+    # Most Index.as_query_engine support llm=llm parameter (e.g., vector/document types), KG can also pass llm through a dedicated KG Query Engine
+    try:
+        if llm is None:
+            kg_query_engine = kg_index.as_query_engine(
+                include_text=include_text,
+                retriever_mode=retriever_mode,
+                embedding_mode=embedding_mode,
+                response_mode=response_mode,
+                similarity_top_k=similarity_top_k,
+                graph_store_query_depth=graph_store_query_depth,
+                verbose=verbose,
+            )
+        else:
+            kg_query_engine = kg_index.as_query_engine(
+                include_text=include_text,
+                retriever_mode=retriever_mode,
+                embedding_mode=embedding_mode,
+                response_mode=response_mode,
+                similarity_top_k=similarity_top_k,
+                graph_store_query_depth=graph_store_query_depth,
+                verbose=verbose,
+                llm=llm, 
+            )
+        logging.info(f"RAG pipeline created, RAG pipeline: {type(kg_query_engine)}")
+        return kg_query_engine
+    except TypeError:
+        # compatibility with older versions: directly use KG specific engine and pass in llm
+        from llama_index.core.query_engine import KnowledgeGraphQueryEngine
+        kg_query_engine = KnowledgeGraphQueryEngine(
+            storage_context=kg_index._storage_context,
+            llm=llm,
+            verbose=verbose,
+        )
+        logging.info(f"RAG pipeline created, RAG pipeline: {type(kg_query_engine)}")
+        return kg_query_engine  
 
-    return storage_context   
+
+# switch LLM and rebuild the query engine
+def swap_llm_and_rebuild_engine(
+        kg_index,
+        query_engine,
+        tokenizer,
+        old_llm,
+        old_hf_llm,
+        new_llm,
+        *,
+        include_text=False,
+        retriever_mode="hybrid",
+        embedding_mode="hybrid",
+        response_mode="compact",
+        similarity_top_k=30,
+        graph_store_query_depth=5,
+        verbose=False,
+    ):
+
+    '''
+    NOTE:
+    swap the LLM model in the RAG pipeline and rebuild the query engine
+    Steps:
+    1) delete the existing query engine and LLM to free up memory
+    2) release the model and clear settings
+    3) set the new LLM in the global settings
+    4) rebuild the KG query engine with the new LLM
+    5) return the new KG query engine
+
+    !NOT FINISHED YET!
+    
+    '''
+
+    del query_engine
+    del tokenizer  # delete existing model and tokenizer
+    print(f"before release: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
+    release_model(model=old_llm, llm_wrapper=old_hf_llm, also_clear_settings=True)
+    print(f"after release: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
+
+    new_hf_llm = build_llm_by_name(
+        llm_model_name=new_llm,
+        hf_from_pretrained=True,
+    )
+
+    from llama_index.core import Settings
+    Settings.llm = new_hf_llm
+    return build_kg_query_engine(
+        kg_index,
+        llm=new_hf_llm,
+        include_text=include_text,
+        retriever_mode=retriever_mode,
+        embedding_mode=embedding_mode,
+        response_mode=response_mode,
+        similarity_top_k=similarity_top_k,
+        graph_store_query_depth=graph_store_query_depth,
+        verbose=verbose,
+    )
 
 
+'''
+For retriever modules specifically
+'''
 class CustomKGTableRetriever(KGTableRetriever):
 
     def __init__(self, *args, **kwargs):
@@ -599,12 +562,6 @@ class CustomKGTableRetriever(KGTableRetriever):
         return processed_triples
 
 
-# Ensure Ollama is installed
-try:
-    import ollama
-except ImportError:
-    raise ImportError("The 'ollama' package is required but not installed. Please install it using 'pip install ollama'.")
-
 def init_retriever(kg_index,
                    include_text=False,
                    similarity_top_k=10,
@@ -637,6 +594,21 @@ def init_retriever(kg_index,
     return retriever
 
 
+
+'''
+==========================
+The following functions are not in use currently, might deprecate later
+==========================
+'''
+
+# Vector storage context module in the RAG pipeline, used for initializing the vector storage
+def init_vector_storage_context(storage_dir="data/index/ade_full_vector"):
+    storage_context = StorageContext.from_defaults(persist_dir=storage_dir)
+    logging.info(f"Vector storage: {storage_dir}")
+    logging.info("Vector storage context loaded")
+
+    return storage_context   
+
 # Aggregated RAG pipeline module, used for initializing the RAG pipeline
 def init_rag_pipeline(kg_index,
                       include_text=False, 
@@ -645,6 +617,12 @@ def init_rag_pipeline(kg_index,
                       retriever_mode="hybrid",
                       verbose=False
                       ):
+    
+    '''
+    NOTE:
+    This function currently is not used, replaced by build_kg_query_engine with optional LLM switching
+    MIGHT DEPRECATE LATER
+    '''
 
     # retriever = init_retriever(
     #     kg_index = kg_index,
@@ -675,4 +653,3 @@ def init_rag_pipeline(kg_index,
 
     logging.info(f"RAG pipeline created, RAG pipeline: {type(kg_query_engine)}")
     return kg_query_engine
-

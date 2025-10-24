@@ -1,0 +1,51 @@
+# Core Deep Learning and ML Frameworks
+torch==2.4.0
+transformers==4.52.1
+accelerate==1.7.0
+bitsandbytes==0.45.1
+peft==0.15.2
+trl==0.17.0
+xformers==0.0.28
+
+# Sentence Transformers and Embeddings
+sentence-transformers==5.1.2
+
+# LlamaIndex Core and Extensions
+llama-index==0.14.5
+llama-index-core==0.14.5
+llama-index-llms-openai==0.6.5
+llama-index-llms-huggingface==0.6.1
+llama-index-llms-huggingface-api==0.6.1
+llama-index-embeddings-huggingface==0.6.1
+llama-index-embeddings-openai==0.5.1
+
+# LangChain
+langchain-core==1.0.0
+langchain-huggingface==1.0.0
+
+# API Clients
+openai==1.109.1
+ollama==0.6.0
+
+# Data Processing and Analysis
+pandas==2.2.3
+numpy==2.1.2
+scikit-learn==1.7.2
+datasets==3.6.0
+
+# Jupyter and Interactive Development
+ipykernel==6.14.0
+ipython==8.36.0
+
+# Utilities
+python-dotenv==1.1.1
+tqdm==4.67.1
+pydantic==2.12.3
+requests==2.32.3
+
+# Unsloth (for efficient fine-tuning)
+unsloth==2025.5.6
+unsloth-zoo==2025.5.7
+
+# Optional: For custom fine-tuning support
+# If you don't use fine-tuning, you can remove these
